@@ -1,7 +1,7 @@
 ## The Core Flow
 
 Your pipeline looks like this:
-
+![release-pipeline](release-pipeline.png)
 **Code → GitLab CI/CD → Docker Image → Artifact Registry → Cloud Run**
 
 Each environment (dev, staging, prod) gets its own Cloud Run service, and promotions between environments are controlled by GitLab pipelines.
