@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Release Pipeline: GitLab × Spring Boot × Cloud Run</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
+
+  :root {
+    --bg: #0a0c10;
+    --surface: #111318;
+    --border: #1e2330;
+    --text: #c9d1e0;
+    --muted: #4a5568;
+    --gitlab: #fc6d26;
+    --spring: #6db33f;
+    --gcp: #4285f4;
+    --dev: #8b5cf6;
+    --staging: #f59e0b;
+    --prod: #10b981;
+    --accent: #38bdf8;
+    --line: #1e2a3a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+    padding: 40px 20px;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 40% at 20% 10%, rgba(66,133,244,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 30% at 80% 80%, rgba(16,185,129,0.05) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrap {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 56px;
+  }
+
+  header h1 {
+    font-size: 13px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--accent);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  header h2 {
+    font-size: 32px;
+    font-weight: 300;
+    color: #e8edf5;
+    letter-spacing: -0.02em;
+  }
+
+  header h2 span { font-weight: 600; }
+
+  /* PIPELINE TRACK */
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 48px;
+    position: relative;
+  }
+
+  .stage {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  .stage:nth-child(1) { animation-delay: 0.05s; }
+  .stage:nth-child(2) { animation-delay: 0.15s; }
+  .stage:nth-child(3) { animation-delay: 0.25s; }
+  .stage:nth-child(4) { animation-delay: 0.35s; }
+  .stage:nth-child(5) { animation-delay: 0.45s; }
+  .stage:nth-child(6) { animation-delay: 0.55s; }
+  .stage:nth-child(7) { animation-delay: 0.65s; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* connector line between stages */
+  .stage:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 52px;
+    right: -12px;
+    width: 24px;
+    height: 2px;
+    background: linear-gradient(to right, var(--border), var(--muted));
+    z-index: 2;
+  }
+
+  /* arrow head */
+  .stage:not(:last-child)::before {
+    content: '›';
+    position: absolute;
+    top: 43px;
+    right: -16px;
+    font-size: 22px;
+    color: var(--muted);
+    z-index: 3;
+    line-height: 1;
+  }
+
+  .node {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    margin-bottom: 12px;
+    position: relative;
+    cursor: default;
+    transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .node:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+
+  .node.gitlab  { border-color: rgba(252,109,38,0.4); box-shadow: 0 0 20px rgba(252,109,38,0.08); }
+  .node.spring  { border-color: rgba(109,179,63,0.4);  box-shadow: 0 0 20px rgba(109,179,63,0.08); }
+  .node.docker  { border-color: rgba(56,189,248,0.4);  box-shadow: 0 0 20px rgba(56,189,248,0.08); }
+  .node.registry{ border-color: rgba(66,133,244,0.4);  box-shadow: 0 0 20px rgba(66,133,244,0.08); }
+  .node.dev-env { border-color: rgba(139,92,246,0.4);  box-shadow: 0 0 20px rgba(139,92,246,0.08); }
+  .node.staging-env { border-color: rgba(245,158,11,0.4); box-shadow: 0 0 20px rgba(245,158,11,0.08); }
+  .node.prod-env { border-color: rgba(16,185,129,0.4); box-shadow: 0 0 20px rgba(16,185,129,0.08); }
+
+  .node .badge {
+    position: absolute;
+    top: -6px; right: -6px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    font-size: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    border: 1px solid var(--bg);
+  }
+  .badge.auto { background: var(--spring); color: #000; }
+  .badge.manual { background: var(--staging); color: #000; }
+
+  .node-label {
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--muted);
+    text-align: center;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1.4;
+  }
+
+  .node-sublabel {
+    font-size: 10px;
+    color: var(--muted);
+    opacity: 0.6;
+    text-align: center;
+    margin-top: 3px;
+  }
+
+  /* TRIGGER SECTION */
+  .triggers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .trigger-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    animation: fadeUp 0.5s ease 0.7s both;
+  }
+
+  .trigger-card h3 {
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 14px;
+  }
+
+  .trigger-card.auto-card { border-color: rgba(109,179,63,0.25); }
+  .trigger-card.auto-card h3 { color: var(--spring); }
+  .trigger-card.manual-card { border-color: rgba(245,158,11,0.25); }
+  .trigger-card.manual-card h3 { color: var(--staging); }
+
+  .trigger-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+
+  .trigger-row:last-child { margin-bottom: 0; }
+
+  .pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .pill.main   { background: rgba(139,92,246,0.15); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+  .pill.tag    { background: rgba(245,158,11,0.12);  color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+  .pill.branch { background: rgba(56,189,248,0.12); color: #7dd3fc; border: 1px solid rgba(56,189,248,0.3); }
+
+  .arrow-small { color: var(--muted); font-size: 14px; }
+
+  /* ENVIRONMENTS ROW */
+  .envs {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 32px;
+    animation: fadeUp 0.5s ease 0.85s both;
+  }
+
+  .env-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .env-card.dev-card     { border-color: rgba(139,92,246,0.25); }
+  .env-card.staging-card { border-color: rgba(245,158,11,0.25); }
+  .env-card.prod-card    { border-color: rgba(16,185,129,0.25); }
+
+  .env-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .env-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dev-card .env-dot     { background: var(--dev); box-shadow: 0 0 6px var(--dev); }
+  .staging-card .env-dot { background: var(--staging); box-shadow: 0 0 6px var(--staging); }
+  .prod-card .env-dot    { background: var(--prod); box-shadow: 0 0 6px var(--prod); }
+
+  .env-name {
+    font-size: 13px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .dev-card .env-name     { color: #a78bfa; }
+  .staging-card .env-name { color: #fbbf24; }
+  .prod-card .env-name    { color: #34d399; }
+
+  .env-items { list-style: none; }
+  .env-items li {
+    font-size: 12px;
+    color: #6b7a94;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .env-items li:last-child { border-bottom: none; }
+  .env-items li::before { content: '—'; color: var(--border); font-size: 10px; }
+
+  /* ROLLBACK SECTION */
+  .rollback {
+    background: var(--surface);
+    border: 1px solid rgba(16,185,129,0.2);
+    border-radius: 12px;
+    padding: 20px 24px;
+    animation: fadeUp 0.5s ease 1s both;
+  }
+
+  .rollback h3 {
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--prod);
+    margin-bottom: 12px;
+  }
+
+  .rollback-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .rb-item {
+    font-size: 12px;
+    color: #6b7a94;
+  }
+
+  .rb-item strong {
+    display: block;
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: #8ba1c0;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .legend {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-top: 36px;
+    flex-wrap: wrap;
+    animation: fadeUp 0.5s ease 1.1s both;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--muted);
+  }
+
+  .legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 2px;
+  }
+
+  @media (max-width: 700px) {
+    .pipeline { flex-direction: column; align-items: center; gap: 16px; }
+    .stage::after, .stage::before { display: none; }
+    .triggers, .envs, .rollback-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>CI/CD Release Management</h1>
+    <h2>GitLab <span>×</span> Spring Boot <span>×</span> Cloud Run</h2>
+  </header>
+
+  <!-- MAIN PIPELINE -->
+  <div class="pipeline">
+
+    <div class="stage">
+      <div class="node gitlab">🦊</div>
+      <div class="node-label">GitLab<br>Repo</div>
+      <div class="node-sublabel">push / tag</div>
+    </div>
+
+    <div class="stage">
+      <div class="node spring">🌱</div>
+      <div class="node-label">Maven<br>Build</div>
+      <div class="node-sublabel">mvn package</div>
+    </div>
+
+    <div class="stage">
+      <div class="node docker">🐳</div>
+      <div class="node-label">Docker<br>Image</div>
+      <div class="node-sublabel">docker build</div>
+    </div>
+
+    <div class="stage">
+      <div class="node registry">📦</div>
+      <div class="node-label">Artifact<br>Registry</div>
+      <div class="node-sublabel">docker push</div>
+    </div>
+
+    <div class="stage">
+      <div class="node dev-env">
+        <div class="badge auto">A</div>
+        🔮
+      </div>
+      <div class="node-label">Cloud Run<br>Dev</div>
+      <div class="node-sublabel">auto deploy</div>
+    </div>
+
+    <div class="stage">
+      <div class="node staging-env">
+        <div class="badge auto">A</div>
+        🧪
+      </div>
+      <div class="node-label">Cloud Run<br>Staging</div>
+      <div class="node-sublabel">on git tag</div>
+    </div>
+
+    <div class="stage">
+      <div class="node prod-env">
+        <div class="badge manual">M</div>
+        🚀
+      </div>
+      <div class="node-label">Cloud Run<br>Prod</div>
+      <div class="node-sublabel">manual gate</div>
+    </div>
+
+  </div>
+
+  <!-- TRIGGERS -->
+  <div class="triggers">
+    <div class="trigger-card auto-card">
+      <h3>Automatic Triggers</h3>
+      <div class="trigger-row">
+        <span class="pill branch">feature/*</span>
+        <span class="arrow-small">›</span>
+        <span>Build + unit tests only</span>
+      </div>
+      <div class="trigger-row">
+        <span class="pill main">main</span>
+        <span class="arrow-small">›</span>
+        <span>Build → Publish → Deploy Dev</span>
+      </div>
+      <div class="trigger-row">
+        <span class="pill tag">v1.2.3</span>
+        <span class="arrow-small">›</span>
+        <span>Full pipeline → Dev → Staging</span>
+      </div>
+    </div>
+
+    <div class="trigger-card manual-card">
+      <h3>Manual Gates</h3>
+      <div class="trigger-row">
+        <span style="font-size:18px">👆</span>
+        <span>Production deploy requires human approval in GitLab UI</span>
+      </div>
+      <div class="trigger-row">
+        <span style="font-size:18px">🔀</span>
+        <span>Traffic shift: 0% → canary (10%) → 100% via <code style="font-size:11px; color:#7dd3fc">gcloud run services update-traffic</code></span>
+      </div>
+      <div class="trigger-row">
+        <span style="font-size:18px">⏪</span>
+        <span>Rollback = point traffic to any prior revision instantly</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ENVIRONMENTS -->
+  <div class="envs">
+    <div class="env-card dev-card">
+      <div class="env-header">
+        <div class="env-dot"></div>
+        <div class="env-name">Dev</div>
+      </div>
+      <ul class="env-items">
+        <li>Deploys on every merge to <code>main</code></li>
+        <li>Profile: <code>SPRING_PROFILES_ACTIVE=dev</code></li>
+        <li>Public access allowed</li>
+        <li>Snapshot versioning</li>
+        <li>Lightest resource config</li>
+      </ul>
+    </div>
+
+    <div class="env-card staging-card">
+      <div class="env-header">
+        <div class="env-dot"></div>
+        <div class="env-name">Staging</div>
+      </div>
+      <ul class="env-items">
+        <li>Deploys on Git tag <code>v*.*.*</code> only</li>
+        <li>Profile: <code>SPRING_PROFILES_ACTIVE=staging</code></li>
+        <li>Authenticated access only</li>
+        <li>Mirrors prod config + secrets</li>
+        <li>QA sign-off required</li>
+      </ul>
+    </div>
+
+    <div class="env-card prod-card">
+      <div class="env-header">
+        <div class="env-dot"></div>
+        <div class="env-name">Prod</div>
+      </div>
+      <ul class="env-items">
+        <li>Manual approval gate in GitLab</li>
+        <li>Deploy with <code>--no-traffic</code> first</li>
+        <li>Canary: 10% then 100%</li>
+        <li>Secrets via Secret Manager</li>
+        <li>Every deploy = new revision</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ROLLBACK / CANARY -->
+  <div class="rollback">
+    <h3>☁️ Cloud Run Superpowers</h3>
+    <div class="rollback-grid">
+      <div class="rb-item">
+        <strong>Instant Rollback</strong>
+        Route 100% traffic to any prior revision. No redeployment needed — takes seconds.
+      </div>
+      <div class="rb-item">
+        <strong>Canary Releases</strong>
+        Split traffic across revisions: e.g. 90% → rev-23, 10% → rev-24. Validate before full cutover.
+      </div>
+      <div class="rb-item">
+        <strong>Immutable Artifacts</strong>
+        Same Docker image that passes staging goes to prod. Env config injected at runtime via env vars + Secret Manager.
+      </div>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--gitlab)"></div> GitLab CI/CD</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--spring)"></div> Spring Boot / Maven</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Docker</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--gcp)"></div> GCP Artifact Registry</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--dev)"></div> Dev Environment</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--staging)"></div> Staging Environment</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--prod)"></div> Production</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#6b7a94"></div> A = Auto &nbsp; M = Manual</div>
+  </div>
+
+</div>
+</body>
+</html>
